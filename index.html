@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NumSweeper v2.5</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 50%, #16213e 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    user-select: none;
+    padding: 20px;
+    overflow: hidden;
+  }
+  .game-wrapper {
+    text-align: center;
+    position: relative;
+    z-index: 1;
+  }
+  .game-wrapper.shake {
+    animation: shake 0.5s ease-out;
+  }
+  @keyframes shake {
+    0%, 100% { transform: translate(0); }
+    10% { transform: translate(-8px, 4px); }
+    20% { transform: translate(8px, -4px); }
+    30% { transform: translate(-6px, 3px); }
+    40% { transform: translate(6px, -3px); }
+    50% { transform: translate(-4px, 2px); }
+    60% { transform: translate(4px, -2px); }
+    70% { transform: translate(-2px, 1px); }
+    80% { transform: translate(2px, -1px); }
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  h1 {
+    font-size: 24px;
+    font-weight: 600;
+    color: #e2e8f0;
+    letter-spacing: 2px;
+  }
+  .score-box {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 12px 28px;
+  }
+  .score-label {
+    font-size: 12px;
+    color: #64748b;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+  .score-value {
+    font-size: 36px;
+    font-weight: 700;
+    color: #38bdf8;
+    font-variant-numeric: tabular-nums;
+  }
+  .score-value .total { color: #475569; font-size: 20px; }
+  .btn-new {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: #fff;
+    border: none;
+    padding: 12px 32px;
+    font-size: 15px;
+    border-radius: 50px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .btn-new:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(99, 102, 241, 0.4); }
+  .btn-new:active { transform: translateY(0); }
+  .hint-bar {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 10px 20px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #94a3b8;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .hint-bar .highlight { color: #fbbf24; font-weight: 600; }
+  .hint-bar .danger { color: #ef4444; font-weight: 600; }
+  .grid-container {
+    display: inline-grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 3px;
+    background: rgba(255,255,255,0.03);
+    padding: 4px;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .cell {
+    width: 56px;
+    height: 56px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    background: rgba(30, 41, 59, 0.6);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s, transform 0.08s;
+    position: relative;
+    font-variant-numeric: tabular-nums;
+    outline: none;
+  }
+  .cell:hover:not(.revealed):not(.game-over) {
+    border-color: rgba(255,255,255,0.3);
+    background: rgba(51, 65, 85, 0.6);
+    z-index: 2;
+  }
+  .cell:active:not(.revealed) { transform: scale(0.93); }
+  .cell.revealed {
+    background: var(--cell-bg);
+    border-color: var(--cell-border);
+    cursor: default;
+    transform: none;
+  }
+  .cell .cell-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: #e2e8f0;
+  }
+  .cell .cell-hint {
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+    margin-top: 1px;
+    display: none;
+  }
+  .cell:not(.revealed) .cell-hint.show { display: block; }
+  .cell.revealed .cell-value { color: #fff; text-shadow: 0 0 12px rgba(255,255,255,0.3); }
+  .cell.neighbor-highlight {
+    border-color: rgba(251, 191, 36, 0.6) !important;
+    background: rgba(251, 191, 36, 0.1) !important;
+  }
+  .cell.exploded {
+    animation: explode 0.6s ease-out;
+    border-color: #ef4444 !important;
+    background: rgba(239, 68, 68, 0.3) !important;
+  }
+  @keyframes explode {
+    0% { transform: scale(1); background: #fef2f2; box-shadow: 0 0 40px rgba(255,100,50,0.8); }
+    30% { transform: scale(1.25); background: #fca5a5; }
+    100% { transform: scale(1); background: rgba(239, 68, 68, 0.3); }
+  }
+  .cell.risk-low { border-color: rgba(74, 222, 128, 0.3); }
+  .cell.risk-mid { border-color: rgba(251, 191, 36, 0.3); }
+  .cell.risk-high { border-color: rgba(249, 115, 22, 0.3); }
+  .cell.risk-extreme { border-color: rgba(239, 68, 68, 0.35); }
+  .legend {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #64748b;
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    animation: fadeIn 0.3s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .overlay-card {
+    background: linear-gradient(145deg, #1e293b, #0f172a);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 24px;
+    padding: 40px 48px;
+    text-align: center;
+    max-width: 400px;
+    animation: slideUp 0.4s ease;
+  }
+  @keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .overlay-card h2 { font-size: 28px; color: #f1f5f9; margin-bottom: 8px; }
+  .overlay-card .explosion-detail {
+    color: #94a3b8;
+    font-size: 14px;
+    margin: 12px 0 20px;
+    line-height: 1.8;
+  }
+  .overlay-card .explosion-detail span { color: #ef4444; font-weight: 700; }
+  .overlay-card .final-score {
+    font-size: 56px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #6366f1, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .overlay-card button { margin-top: 24px; }
+  #fireworks-canvas {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 200;
+  }
+  .screen-flash {
+    position: fixed;
+    inset: 0;
+    background: rgba(255, 180, 80, 0.2);
+    pointer-events: none;
+    z-index: 150;
+    animation: flash 0.4s ease-out forwards;
+  }
+  @keyframes flash {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  .dist-panel {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .dist-grid {
+    display: grid;
+    grid-template-columns: repeat(10, 10px);
+    grid-template-rows: repeat(10, 10px);
+    gap: 1px;
+  }
+  .dist-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: #334155;
+    transition: background 0.3s;
+  }
+  .dist-dot.revealed { background: #4ade80; }
+  .dist-stats {
+    font-size: 11px;
+    color: #64748b;
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .dist-stats span { white-space: nowrap; }
+  .dist-stats .r-low { color: #4ade80; }
+  .dist-stats .r-mid { color: #facc15; }
+  .dist-stats .r-high { color: #fb923c; }
+  .dist-stats .r-ext { color: #ef4444; }
+  .cell-score {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    font-size: 9px;
+    color: rgba(255,255,255,0.45);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .cell.best-move {
+    border-color: rgba(251, 191, 36, 0.8) !important;
+    box-shadow: 0 0 16px rgba(251, 191, 36, 0.4), inset 0 0 10px rgba(251, 191, 36, 0.12);
+    animation: bestPulse 1.2s ease-in-out infinite;
+    z-index: 3;
+  }
+  @keyframes bestPulse {
+    0%, 100% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.3), inset 0 0 6px rgba(251, 191, 36, 0.08); }
+    50% { box-shadow: 0 0 24px rgba(251, 191, 36, 0.55), inset 0 0 16px rgba(251, 191, 36, 0.22); }
+  }
+  .cell.doomed::after {
+    content: '✕';
+    position: absolute;
+    font-size: 22px;
+    color: rgba(239, 68, 68, 0.5);
+    pointer-events: none;
+  }
+  .strategy-panel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  .btn-strategy {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #94a3b8;
+    padding: 5px 14px;
+    font-size: 11px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .btn-strategy:hover { background: rgba(255,255,255,0.12); color: #e2e8f0; }
+  .strategy-result {
+    font-size: 12px;
+    color: #64748b;
+    min-height: 18px;
+  }
+  .strategy-result .highlight { color: #fbbf24; font-weight: 600; }
+  .strategy-result .win { color: #4ade80; font-weight: 600; }
+  .strategy-result .lose { color: #ef4444; }
+  @media (max-width: 640px) {
+    .cell { width: 32px; height: 32px; border-radius: 4px; }
+    .cell .cell-value { font-size: 13px; }
+    .cell .cell-hint { font-size: 8px; }
+    .grid-container { gap: 2px; padding: 2px; }
+    h1 { font-size: 18px; }
+    .score-value { font-size: 28px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="fireworks-canvas"></canvas>
+<div class="game-wrapper" id="gameWrapper">
+  <div class="header">
+    <h1>NumSweeper v2.5</h1>
+    <div class="score-box">
+      <div class="score-label">已翻开</div>
+      <div class="score-value"><span id="score">0</span><span class="total">/100</span></div>
+    </div>
+    <button class="btn-new" onclick="resetGame()">新游戏</button>
+  </div>
+  <div class="hint-bar" id="hintBar">将鼠标悬停在格子上查看风险提示</div>
+  <div class="grid-container" id="grid"></div>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#4ade80;box-shadow:0 0 6px rgba(74,222,128,0.4)"></div>强烈推荐</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#facc15;box-shadow:0 0 6px rgba(250,204,21,0.3)"></div>可以点击</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#fb923c"></div>风险偏高</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>极不推荐</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#fbbf24;box-shadow:0 0 10px rgba(251,191,36,0.6)"></div>最优选择</div>
+    <div class="legend-item" style="color:#ef4444"><b>✕</b> 必爆</div>
+  </div>
+  <div class="dist-panel" id="distPanel"></div>
+  <div class="strategy-panel" id="strategyPanel">
+    <button class="btn-strategy" onclick="compareStrategies()">对比当前棋盘</button>
+    <button class="btn-strategy" onclick="batchSimulate(100)">批量模拟 x100</button>
+    <span class="strategy-result" id="strategyResult"></span>
+  </div>
+</div>
+<div class="overlay" id="overlay" style="display:none">
+  <div class="overlay-card">
+    <h2>爆炸了!</h2>
+    <div class="explosion-detail" id="explosionDetail"></div>
+    <div class="final-score" id="finalScore">0</div>
+    <div style="color:#64748b;font-size:14px;margin-top:4px">个格子被安全翻开</div>
+    <button class="btn-new" onclick="resetGame()" style="margin-top:24px">再来一局</button>
+  </div>
+</div>
+<script>
+const SIZE = 10;
+const THRESHOLD = 250;
+let grid = [];
+let revealed = [];
+let gameOver = false;
+let score = 0;
+let explodedCell = null;
+
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playClickSound() {
+  try {
+    ensureAudio();
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(800, t);
+    osc.frequency.exponentialRampToValueAtTime(400, t + 0.04);
+    gain.gain.setValueAtTime(0.12, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+    osc.start(t);
+    osc.stop(t + 0.06);
+  } catch(e) {}
+}
+
+function playExplosionSound() {
+  try {
+    ensureAudio();
+    const t = audioCtx.currentTime;
+    const dur = 1.5;
+    const sampleRate = audioCtx.sampleRate;
+    const bufSize = Math.floor(sampleRate * dur);
+    const buffer = audioCtx.createBuffer(1, bufSize, sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (sampleRate * 0.18));
+    }
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(400, t);
+    filter.frequency.exponentialRampToValueAtTime(40, t + 0.6);
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0.5, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    noise.start(t);
+    noise.stop(t + dur);
+  } catch(e) {}
+}
+
+let softVoice = null;
+
+function selectSoftVoice() {
+  return new Promise((resolve) => {
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      softVoice = voices.find(v => v.lang === 'zh-CN' && v.name.includes('Tingting'))
+        || voices.find(v => v.lang === 'zh-CN' && v.name.includes('Sin-Ji'))
+        || voices.find(v => v.lang.startsWith('zh') && v.name.toLowerCase().includes('female'))
+        || voices.find(v => v.lang === 'zh-CN')
+        || voices.find(v => v.lang.startsWith('zh'));
+    }
+    resolve();
+  });
+}
+
+window.speechSynthesis.onvoiceschanged = () => selectSoftVoice();
+selectSoftVoice();
+
+function speak(text) {
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'zh-CN';
+    u.rate = 0.82;
+    u.pitch = 1.05;
+    u.volume = 1;
+    if (softVoice) u.voice = softVoice;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  } catch(e) {}
+}
+
+const INTRO_TEXT = '新翻开的格子与相邻已翻开格子数字超过250就会触发地雷，请谨慎点击。';
+const EXPLOSION_TEXT = '您已触雷，请保重！';
+
+let fwCanvas, fwCtx, particles = [], fwAnim = null;
+
+function initFireworks() {
+  fwCanvas = document.getElementById('fireworks-canvas');
+  fwCtx = fwCanvas.getContext('2d');
+  resizeFireworks();
+  window.addEventListener('resize', resizeFireworks);
+}
+
+function resizeFireworks() {
+  if (fwCanvas) {
+    fwCanvas.width = window.innerWidth;
+    fwCanvas.height = window.innerHeight;
+  }
+}
+
+class Particle {
+  constructor(x, y, color) {
+    this.x = x;
+    this.y = y;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 6;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed - Math.random() * 3;
+    this.color = color;
+    this.size = 1.5 + Math.random() * 3.5;
+    this.life = 1;
+    this.decay = 0.006 + Math.random() * 0.018;
+    this.gravity = 0.04;
+    this.trail = [];
+    this.maxTrail = 4;
+  }
+  update() {
+    this.trail.push({ x: this.x, y: this.y });
+    if (this.trail.length > this.maxTrail) this.trail.shift();
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vy += this.gravity;
+    this.vx *= 0.995;
+    this.life -= this.decay;
+  }
+  draw(ctx) {
+    if (this.trail.length > 1) {
+      for (let i = 1; i < this.trail.length; i++) {
+        const alpha = (i / this.trail.length) * this.life * 0.4;
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = this.size * 0.6;
+        ctx.beginPath();
+        ctx.moveTo(this.trail[i - 1].x, this.trail[i - 1].y);
+        ctx.lineTo(this.trail[i].x, this.trail[i].y);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = this.life;
+    ctx.fillStyle = this.color;
+    ctx.shadowColor = this.color;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+}
+
+function launchFireworks() {
+  if (!fwCanvas) initFireworks();
+  const colors = ['#ff4444','#ff7722','#ffaa00','#ffdd00','#ff5500','#ff3366','#ffcc44','#ffffff','#ff6600','#ff9922'];
+  const burstCount = 10;
+  for (let b = 0; b < burstCount; b++) {
+    const cx = Math.random() * fwCanvas.width * 0.7 + fwCanvas.width * 0.15;
+    const cy = Math.random() * fwCanvas.height * 0.5 + fwCanvas.height * 0.08;
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const count = 30 + Math.floor(Math.random() * 50);
+    for (let i = 0; i < count; i++) {
+      particles.push(new Particle(cx, cy, color));
+    }
+  }
+  if (!fwAnim) animateFireworks();
+}
+
+function animateFireworks() {
+  fwCtx.clearRect(0, 0, fwCanvas.width, fwCanvas.height);
+  particles = particles.filter(p => p.life > 0);
+  for (const p of particles) { p.update(); p.draw(fwCtx); }
+  if (particles.length > 0) {
+    fwAnim = requestAnimationFrame(animateFireworks);
+  } else {
+    fwAnim = null;
+  }
+}
+
+function stopFireworks() {
+  particles = [];
+  if (fwAnim) { cancelAnimationFrame(fwAnim); fwAnim = null; }
+  if (fwCtx) fwCtx.clearRect(0, 0, fwCanvas.width, fwCanvas.height);
+}
+
+function screenFlash() {
+  const flash = document.createElement('div');
+  flash.className = 'screen-flash';
+  document.body.appendChild(flash);
+  setTimeout(() => flash.remove(), 500);
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function getSimScore(g, r, row, col) {
+  const nbrs = [];
+  if (row > 0) nbrs.push([row - 1, col]);
+  if (row < SIZE - 1) nbrs.push([row + 1, col]);
+  if (col > 0) nbrs.push([row, col - 1]);
+  if (col < SIZE - 1) nbrs.push([row, col + 1]);
+  const revSum = nbrs.reduce((s, [nr, nc]) => s + (r[nr][nc] ? g[nr][nc] : 0), 0);
+  const maxSafe = THRESHOLD - revSum;
+  const hidden = [];
+  for (let rr = 0; rr < SIZE; rr++) {
+    for (let cc = 0; cc < SIZE; cc++) {
+      if (!r[rr][cc]) hidden.push(g[rr][cc]);
+    }
+  }
+  if (hidden.length === 0) return { score: 0, p: 0, unrevealedNbrs: 0 };
+  let safeCount = 0;
+  for (const n of hidden) { if (n <= maxSafe) safeCount++; }
+  const p = safeCount / hidden.length;
+  const unrevealedNbrs = nbrs.filter(([nr, nc]) => !r[nr][nc]).length;
+  return { score: p / (1 + unrevealedNbrs), p, unrevealedNbrs };
+}
+
+function simulateMoveState(g, r, row, col) {
+  const val = g[row][col];
+  const nbrs = [];
+  if (row > 0) nbrs.push([row - 1, col]);
+  if (row < SIZE - 1) nbrs.push([row + 1, col]);
+  if (col > 0) nbrs.push([row, col - 1]);
+  if (col < SIZE - 1) nbrs.push([row, col + 1]);
+  let sum = val;
+  for (const [nr, nc] of nbrs) { if (r[nr][nc]) sum += g[nr][nc]; }
+  return { safe: sum <= THRESHOLD, sum };
+}
+
+function runStrategy(g, r, type) {
+  let score = 0;
+  let phase = type === 'border-last' ? 'inner' : 'all';
+
+  while (true) {
+    let bestScore = -1;
+    let bestRC = null;
+
+    for (let row = 0; row < SIZE; row++) {
+      for (let col = 0; col < SIZE; col++) {
+        if (r[row][col]) continue;
+
+        if (type === 'border-last') {
+          const isInner = row >= 1 && row <= SIZE - 2 && col >= 1 && col <= SIZE - 2;
+          if (phase === 'inner' && !isInner) continue;
+          if (phase === 'border' && isInner) continue;
+        }
+
+        const s = getSimScore(g, r, row, col);
+        if (s.score > bestScore) { bestScore = s.score; bestRC = [row, col]; }
+      }
+    }
+
+    if (type === 'border-last' && phase === 'inner' && (bestRC === null || bestScore <= 0)) {
+      phase = 'border';
+      continue;
+    }
+
+    if (!bestRC || bestScore <= 0) break;
+
+    const [row, col] = bestRC;
+    r[row][col] = true;
+    const result = simulateMoveState(g, r, row, col);
+    if (!result.safe) break;
+    score++;
+  }
+
+  return score;
+}
+
+function compareStrategies() {
+  if (gameOver) return;
+
+  const g1 = grid.map(row => [...row]);
+  const r1 = revealed.map(row => [...row]);
+  const g2 = grid.map(row => [...row]);
+  const r2 = revealed.map(row => [...row]);
+
+  const sV25 = runStrategy(g1, r1, 'v25');
+  const sBL = runStrategy(g2, r2, 'border-last');
+
+  const el = document.getElementById('strategyResult');
+  if (sV25 > sBL) {
+    el.innerHTML = `v2.5 <span class="win">${sV25}</span> vs BL <span class="lose">${sBL}</span> <span class="win">(+${sV25 - sBL})</span>`;
+  } else if (sBL > sV25) {
+    el.innerHTML = `v2.5 <span class="lose">${sV25}</span> vs BL <span class="win">${sBL}</span> <span class="win">(+${sBL - sV25})</span>`;
+  } else {
+    el.innerHTML = `v2.5 <span class="highlight">${sV25}</span> vs BL <span class="highlight">${sBL}</span> (平局)`;
+  }
+}
+
+function batchSimulate(count) {
+  const el = document.getElementById('strategyResult');
+  el.textContent = '模拟中...';
+
+  setTimeout(() => {
+    let total25 = 0, totalBL = 0;
+    let wins25 = 0, winsBL = 0, ties = 0;
+
+    for (let i = 0; i < count; i++) {
+      const nums = shuffle(Array.from({ length: 100 }, (_, j) => j + 1));
+      const g = [];
+      const r = [];
+      for (let row = 0; row < SIZE; row++) {
+        g[row] = nums.slice(row * SIZE, (row + 1) * SIZE);
+        r[row] = Array(SIZE).fill(false);
+      }
+
+      const s25 = runStrategy(g, r, 'v25');
+
+      const g2 = g.map(row => [...row]);
+      const r2 = r.map(row => [...row]);
+      const sBL = runStrategy(g2, r2, 'border-last');
+
+      total25 += s25;
+      totalBL += sBL;
+      if (s25 > sBL) wins25++;
+      else if (sBL > s25) winsBL++;
+      else ties++;
+    }
+
+    const avg25 = (total25 / count).toFixed(1);
+    const avgBL = (totalBL / count).toFixed(1);
+    el.innerHTML = `x${count} | v2.5 <span class="highlight">${avg25}</span> vs BL <span class="highlight">${avgBL}</span> | 胜率 <span class="win">${wins25}</span>:<span class="lose">${winsBL}</span>:${ties}`;
+  }, 10);
+}
+
+function initGrid() {
+  const nums = shuffle(Array.from({length: 100}, (_, i) => i + 1));
+  grid = [];
+  for (let r = 0; r < SIZE; r++) {
+    grid[r] = nums.slice(r * SIZE, (r + 1) * SIZE);
+  }
+  revealed = Array.from({length: SIZE}, () => Array(SIZE).fill(false));
+  gameOver = false;
+  score = 0;
+  explodedCell = null;
+}
+
+function getNeighbors(r, c) {
+  const n = [];
+  if (r > 0) n.push([r - 1, c]);
+  if (r < SIZE - 1) n.push([r + 1, c]);
+  if (c > 0) n.push([r, c - 1]);
+  if (c < SIZE - 1) n.push([r, c + 1]);
+  return n;
+}
+
+function revealedSum(r, c) {
+  return getNeighbors(r, c).reduce((s, [nr, nc]) => s + (revealed[nr][nc] ? grid[nr][nc] : 0), 0);
+}
+
+function getUnrevealedNeighborCount(r, c) {
+  return getNeighbors(r, c).filter(([nr, nc]) => !revealed[nr][nc]).length;
+}
+
+function cellStrategicScore(r, c) {
+  if (revealed[r][c]) return { score: 0, p: 1, unrevealedNbrs: 0, isDoomed: false };
+  const prob = cellSafetyProbability(r, c);
+  const unrevealedNbrs = getUnrevealedNeighborCount(r, c);
+  const score = prob.p / (1 + unrevealedNbrs);
+  return {
+    score,
+    p: prob.p,
+    maxSafe: prob.maxSafe,
+    unrevealedNbrs,
+    isGuaranteed: prob.isGuaranteed,
+    isDoomed: prob.isDoomed
+  };
+}
+
+function getScoreRiskClass(score) {
+  if (score === 0) return null;
+  if (score >= 0.8) return 'risk-low';
+  if (score >= 0.5) return 'risk-mid';
+  if (score >= 0.25) return 'risk-high';
+  return 'risk-extreme';
+}
+
+function findBestMoves() {
+  let bestScore = -1;
+  const moves = [];
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      if (revealed[r][c]) continue;
+      const s = cellStrategicScore(r, c);
+      if (s.score > bestScore) { bestScore = s.score; moves.length = 0; }
+      if (s.score === bestScore) moves.push([r, c]);
+    }
+  }
+  return { bestScore, moves: new Set(moves.map(([r, c]) => r * SIZE + c)) };
+}
+
+function getColorForValue(v) {
+  const t = (v - 1) / 99;
+  const h = 120 - t * 120;
+  return `hsl(${h}, 70%, ${45 + t * 15}%)`;
+}
+
+function getHiddenNumbers() {
+  const hidden = [];
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      if (!revealed[r][c]) hidden.push(grid[r][c]);
+    }
+  }
+  return hidden.sort((a, b) => a - b);
+}
+
+function cellSafetyProbability(r, c) {
+  if (revealed[r][c]) return { p: 1, maxSafe: 0, isGuaranteed: false, isDoomed: false };
+  const maxSafe = THRESHOLD - revealedSum(r, c);
+  const hidden = getHiddenNumbers();
+  if (hidden.length === 0) return { p: 1, maxSafe, isGuaranteed: true, isDoomed: false };
+  let safeCount = 0;
+  for (const n of hidden) {
+    if (n <= maxSafe) safeCount++;
+  }
+  const p = safeCount / hidden.length;
+  return { p, maxSafe, isGuaranteed: p === 1, isDoomed: p === 0 };
+}
+
+function renderDistPanel() {
+  const panel = document.getElementById('distPanel');
+  if (!panel) return;
+  const hidden = getHiddenNumbers();
+  const hiddenSet = new Set(hidden);
+
+  let gridHtml = '<div class="dist-grid">';
+  for (let i = 1; i <= 100; i++) {
+    const cls = hiddenSet.has(i) ? '' : 'revealed';
+    gridHtml += `<div class="dist-dot ${cls}" title="${i}"></div>`;
+  }
+  gridHtml += '</div>';
+
+  let statsHtml = '<div class="dist-stats">';
+  statsHtml += `<span>未揭示: <b>${hidden.length}</b></span>`;
+  const ranges = [[1,25,'r-low'],[26,50,'r-mid'],[51,75,'r-high'],[76,100,'r-ext']];
+  for (const [lo, hi, cls] of ranges) {
+    const count = hidden.filter(n => n >= lo && n <= hi).length;
+    statsHtml += `<span class="${cls}">${lo}-${hi}: <b>${count}</b></span>`;
+  }
+  statsHtml += '</div>';
+
+  panel.innerHTML = gridHtml + statsHtml;
+}
+
+function renderGrid() {
+  const container = document.getElementById('grid');
+  container.innerHTML = '';
+  const bestMoves = gameOver ? { moves: new Set() } : findBestMoves();
+
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const cell = document.createElement('button');
+      cell.className = 'cell';
+      cell.dataset.row = r;
+      cell.dataset.col = c;
+
+      const valSpan = document.createElement('span');
+      valSpan.className = 'cell-value';
+
+      const hintSpan = document.createElement('span');
+      hintSpan.className = 'cell-hint';
+
+      if (revealed[r][c]) {
+        cell.classList.add('revealed');
+        const color = getColorForValue(grid[r][c]);
+        cell.style.setProperty('--cell-bg', color);
+        cell.style.setProperty('--cell-border', color);
+        valSpan.textContent = grid[r][c];
+      } else if (!gameOver) {
+        valSpan.textContent = '?';
+        const known = revealedSum(r, c);
+        if (known > 0) {
+          hintSpan.textContent = known;
+          hintSpan.classList.add('show');
+        }
+
+        const strat = cellStrategicScore(r, c);
+        const scoreIdx = Math.round(strat.score * 100);
+
+        const scoreSpan = document.createElement('span');
+        scoreSpan.className = 'cell-score';
+        scoreSpan.textContent = scoreIdx;
+        cell.appendChild(scoreSpan);
+
+        const riskClass = getScoreRiskClass(strat.score);
+        if (riskClass) cell.classList.add(riskClass);
+
+        if (strat.isDoomed) {
+          cell.classList.add('doomed');
+        } else if (bestMoves.moves.has(r * SIZE + c)) {
+          cell.classList.add('best-move');
+        }
+      } else {
+        valSpan.textContent = grid[r][c];
+        valSpan.style.color = 'rgba(255,255,255,0.3)';
+      }
+
+      if (explodedCell && r === explodedCell[0] && c === explodedCell[1]) {
+        cell.classList.add('exploded');
+      }
+
+      cell.appendChild(valSpan);
+      cell.appendChild(hintSpan);
+
+      if (!gameOver) {
+        cell.addEventListener('click', () => clickCell(r, c));
+        cell.addEventListener('mouseenter', () => hoverCell(r, c, cell));
+        cell.addEventListener('mouseleave', () => unhoverCell(r, c, cell));
+      }
+
+      container.appendChild(cell);
+    }
+  }
+  if (gameOver) {
+    document.querySelectorAll('.cell').forEach(c => c.classList.add('game-over'));
+  }
+  document.getElementById('score').textContent = score;
+}
+
+function clickCell(r, c) {
+  if (gameOver || revealed[r][c]) return;
+
+  playClickSound();
+
+  revealed[r][c] = true;
+  score++;
+
+  const value = grid[r][c];
+  const neighbors = getNeighbors(r, c);
+  const revealedNeighbors = neighbors.filter(([nr, nc]) => revealed[nr][nc]);
+  let sum = value;
+  for (const [nr, nc] of revealedNeighbors) {
+    sum += grid[nr][nc];
+  }
+
+  if (sum > THRESHOLD) {
+    gameOver = true;
+    explodedCell = [r, c];
+    renderGrid();
+    renderDistPanel();
+
+    playExplosionSound();
+    speak(EXPLOSION_TEXT);
+    screenFlash();
+    document.getElementById('gameWrapper').classList.add('shake');
+    setTimeout(() => document.getElementById('gameWrapper').classList.remove('shake'), 600);
+    launchFireworks();
+
+    const neighborValues = revealedNeighbors.map(([nr, nc]) => grid[nr][nc]);
+    const formula = [value, ...neighborValues].join(' + ');
+    document.getElementById('explosionDetail').innerHTML =
+      `<span>${formula} = ${sum}</span> > ${THRESHOLD}`;
+    document.getElementById('finalScore').textContent = score - 1;
+
+    setTimeout(() => {
+      for (let rr = 0; rr < SIZE; rr++) {
+        for (let cc = 0; cc < SIZE; cc++) {
+          revealed[rr][cc] = true;
+        }
+      }
+      renderGrid();
+      renderDistPanel();
+      document.getElementById('overlay').style.display = 'flex';
+    }, 1500);
+
+    return;
+  }
+
+  renderGrid();
+  renderDistPanel();
+}
+
+function hoverCell(r, c, cellEl) {
+  if (gameOver || revealed[r][c]) return;
+
+  const neighbors = getNeighbors(r, c);
+  document.querySelectorAll('.cell.neighbor-highlight').forEach(el => el.classList.remove('neighbor-highlight'));
+
+  let neighborList = [];
+  for (const [nr, nc] of neighbors) {
+    const nEl = document.querySelector(`.cell[data-row="${nr}"][data-col="${nc}"]`);
+    if (nEl && revealed[nr][nc]) {
+      nEl.classList.add('neighbor-highlight');
+      neighborList.push(grid[nr][nc]);
+    }
+  }
+
+  const known = neighborList.reduce((s, v) => s + v, 0);
+  const prob = cellSafetyProbability(r, c);
+  const strat = cellStrategicScore(r, c);
+  const bar = document.getElementById('hintBar');
+  const pct = (prob.p * 100).toFixed(1);
+  const scoreIdx = Math.round(strat.score * 100);
+  let idxClass = '';
+  if (strat.score >= 0.8) idxClass = 'highlight';
+  else if (strat.score >= 0.5) idxClass = 'highlight';
+  else if (strat.isDoomed) idxClass = 'danger';
+
+  const pollution = strat.unrevealedNbrs > 0
+    ? `<span style="color:#94a3b8">污染度:</span> <span class="highlight">${strat.unrevealedNbrs}格</span>`
+    : '<span style="color:#4ade80">无污染</span>';
+
+  bar.innerHTML = `(${r + 1},${c + 1}) | 安全概率 <span class="${prob.p >= 0.7 ? 'highlight' : (prob.isDoomed ? 'danger' : '')}">${pct}%</span> | ${pollution} | 推荐指数 <span class="${idxClass}">${scoreIdx}</span>`;
+}
+
+function unhoverCell(r, c, cellEl) {
+  document.querySelectorAll('.cell.neighbor-highlight').forEach(el => el.classList.remove('neighbor-highlight'));
+  document.getElementById('hintBar').textContent = '将鼠标悬停在格子上查看风险提示';
+}
+
+function resetGame() {
+  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('hintBar').textContent = '将鼠标悬停在格子上查看风险提示';
+  stopFireworks();
+  initGrid();
+  renderGrid();
+  renderDistPanel();
+  speak(INTRO_TEXT);
+}
+
+initGrid();
+renderGrid();
+renderDistPanel();
+initFireworks();
+setTimeout(() => speak(INTRO_TEXT), 600);
+</script>
+</body>
+</html>
