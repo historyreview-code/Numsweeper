@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NumSweeper v2.5</title>
+<title>NumSweeper BL v2.5</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -306,6 +306,47 @@
     color: rgba(239, 68, 68, 0.5);
     pointer-events: none;
   }
+  .cell.outer-dimmed {
+    opacity: 0.4;
+    border-style: dashed;
+  }
+  .cell.urgent-target {
+    border-color: rgba(255, 100, 50, 0.6) !important;
+    box-shadow: 0 0 8px rgba(255, 100, 50, 0.25);
+  }
+  .phase-badge {
+    display: inline-block;
+    background: rgba(99, 102, 241, 0.25);
+    color: #a5b4fc;
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-weight: 600;
+    letter-spacing: 1px;
+  }
+  .phase-badge.inner-phase {
+    background: rgba(139, 92, 246, 0.25);
+    color: #c4b5fd;
+  }
+  .phase-badge.border-phase {
+    background: rgba(74, 222, 128, 0.2);
+    color: #86efac;
+  }
+  .endgame-badge {
+    display: inline-block;
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    animation: endPulse 0.8s ease-in-out infinite;
+  }
+  @keyframes endPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
   .strategy-panel {
     display: flex;
     align-items: center;
@@ -347,14 +388,14 @@
 <canvas id="fireworks-canvas"></canvas>
 <div class="game-wrapper" id="gameWrapper">
   <div class="header">
-    <h1>NumSweeper v2.5</h1>
+    <h1>NumSweeper BL v2.5</h1>
     <div class="score-box">
       <div class="score-label">已翻开</div>
       <div class="score-value"><span id="score">0</span><span class="total">/100</span></div>
     </div>
     <button class="btn-new" onclick="resetGame()">新游戏</button>
   </div>
-  <div class="hint-bar" id="hintBar">将鼠标悬停在格子上查看风险提示</div>
+  <div class="hint-bar" id="hintBar">悬停查看策略提示 | <span class="phase-badge">中央启动</span></div>
   <div class="grid-container" id="grid"></div>
   <div class="legend">
     <div class="legend-item"><div class="legend-dot" style="background:#4ade80;box-shadow:0 0 6px rgba(74,222,128,0.4)"></div>强烈推荐</div>
@@ -388,6 +429,7 @@ let revealed = [];
 let gameOver = false;
 let score = 0;
 let explodedCell = null;
+let blPhase = 'center';
 
 let audioCtx = null;
 function ensureAudio() {
@@ -476,8 +518,8 @@ function speak(text) {
   } catch(e) {}
 }
 
-const INTRO_TEXT = '新翻开的格子与相邻已翻开格子数字超过250就会触发地雷，请谨慎点击。';
-const EXPLOSION_TEXT = '您已触雷，请保重！';
+const INTRO_TEXT = '开始游戏，点开单元格与隔壁已打开单元格数字之和大于250则触发地雷';
+const EXPLOSION_TEXT = '您已触雷，请多保重！';
 
 let fwCanvas, fwCtx, particles = [], fwAnim = null;
 
@@ -735,6 +777,7 @@ function initGrid() {
   gameOver = false;
   score = 0;
   explodedCell = null;
+  blPhase = 'center';
 }
 
 function getNeighbors(r, c) {
@@ -758,7 +801,16 @@ function cellStrategicScore(r, c) {
   if (revealed[r][c]) return { score: 0, p: 1, unrevealedNbrs: 0, isDoomed: false };
   const prob = cellSafetyProbability(r, c);
   const unrevealedNbrs = getUnrevealedNeighborCount(r, c);
-  const score = prob.p / (1 + unrevealedNbrs);
+  let score = prob.p / (1 + unrevealedNbrs);
+
+  const neighbors = getNeighbors(r, c);
+  for (const [nr, nc] of neighbors) {
+    if (revealed[nr][nc] && grid[nr][nc] >= 85) {
+      score = Math.min(1, score + 0.3);
+      break;
+    }
+  }
+
   return {
     score,
     p: prob.p,
@@ -777,12 +829,52 @@ function getScoreRiskClass(score) {
   return 'risk-extreme';
 }
 
+function isInnerCell(r, c) {
+  return r >= 1 && r <= SIZE - 2 && c >= 1 && c <= SIZE - 2;
+}
+
+const CENTER_CELLS = new Set([(4 * SIZE + 4), (4 * SIZE + 5), (5 * SIZE + 4), (5 * SIZE + 5)]);
+function isCenterCell(r, c) {
+  return CENTER_CELLS.has(r * SIZE + c);
+}
+
+function phaseBadgeHTML() {
+  const labels = { center: '中央启动', inner: '内圈推进', border: '外圈收尾' };
+  const cls = blPhase === 'border' ? ' border-phase' : blPhase === 'inner' ? ' inner-phase' : '';
+  return `<span class="phase-badge${cls}">${labels[blPhase]}</span>`;
+}
+
 function findBestMoves() {
+  if (blPhase === 'center') {
+    let hasCenter = false;
+    for (let r = 0; r < SIZE && !hasCenter; r++) {
+      for (let c = 0; c < SIZE && !hasCenter; c++) {
+        if (revealed[r][c] || !isCenterCell(r, c)) continue;
+        if (cellStrategicScore(r, c).score > 0) hasCenter = true;
+      }
+    }
+    if (!hasCenter) blPhase = 'inner';
+  }
+
+  if (blPhase === 'inner') {
+    let hasInner = false;
+    for (let r = 0; r < SIZE && !hasInner; r++) {
+      for (let c = 0; c < SIZE && !hasInner; c++) {
+        if (revealed[r][c] || !isInnerCell(r, c)) continue;
+        if (cellStrategicScore(r, c).score > 0) hasInner = true;
+      }
+    }
+    if (!hasInner) blPhase = 'border';
+  }
+
   let bestScore = -1;
   const moves = [];
   for (let r = 0; r < SIZE; r++) {
     for (let c = 0; c < SIZE; c++) {
       if (revealed[r][c]) continue;
+      if (blPhase === 'center' && !isCenterCell(r, c)) continue;
+      if (blPhase === 'inner' && !isInnerCell(r, c)) continue;
+      if (blPhase === 'border' && isInnerCell(r, c)) continue;
       const s = cellStrategicScore(r, c);
       if (s.score > bestScore) { bestScore = s.score; moves.length = 0; }
       if (s.score === bestScore) moves.push([r, c]);
@@ -840,6 +932,9 @@ function renderDistPanel() {
     const count = hidden.filter(n => n >= lo && n <= hi).length;
     statsHtml += `<span class="${cls}">${lo}-${hi}: <b>${count}</b></span>`;
   }
+  if (hidden.length > 0 && hidden.length < 10) {
+    statsHtml += `<span style="color:#fbbf24">剩余: <b>${hidden.join(', ')}</b></span>`;
+  }
   statsHtml += '</div>';
 
   panel.innerHTML = gridHtml + statsHtml;
@@ -892,6 +987,18 @@ function renderGrid() {
           cell.classList.add('doomed');
         } else if (bestMoves.moves.has(r * SIZE + c)) {
           cell.classList.add('best-move');
+        }
+
+        if ((blPhase === 'center' || blPhase === 'inner') && !isInnerCell(r, c)) {
+          cell.classList.add('outer-dimmed');
+        }
+
+        const neighbors = getNeighbors(r, c);
+        for (const [nr, nc] of neighbors) {
+          if (revealed[nr][nc] && grid[nr][nc] >= 85) {
+            cell.classList.add('urgent-target');
+            break;
+          }
         }
       } else {
         valSpan.textContent = grid[r][c];
@@ -1003,17 +1110,19 @@ function hoverCell(r, c, cellEl) {
     ? `<span style="color:#94a3b8">污染度:</span> <span class="highlight">${strat.unrevealedNbrs}格</span>`
     : '<span style="color:#4ade80">无污染</span>';
 
-  bar.innerHTML = `(${r + 1},${c + 1}) | 安全概率 <span class="${prob.p >= 0.7 ? 'highlight' : (prob.isDoomed ? 'danger' : '')}">${pct}%</span> | ${pollution} | 推荐指数 <span class="${idxClass}">${scoreIdx}</span>`;
+  bar.innerHTML = `(${r + 1},${c + 1}) | 安全概率 <span class="${prob.p >= 0.7 ? 'highlight' : (prob.isDoomed ? 'danger' : '')}">${pct}%</span> | ${pollution} | 推荐指数 <span class="${idxClass}">${scoreIdx}</span> | ${phaseBadgeHTML()}`;
 }
 
 function unhoverCell(r, c, cellEl) {
   document.querySelectorAll('.cell.neighbor-highlight').forEach(el => el.classList.remove('neighbor-highlight'));
-  document.getElementById('hintBar').textContent = '将鼠标悬停在格子上查看风险提示';
+  const hidden = getHiddenNumbers();
+  const endgame = hidden.length > 0 && hidden.length < 10 ? `<span class="endgame-badge">残局${hidden.length}格</span>` : '';
+  document.getElementById('hintBar').innerHTML = `悬停查看策略提示 | ${phaseBadgeHTML()} ${endgame}`;
 }
 
 function resetGame() {
   document.getElementById('overlay').style.display = 'none';
-  document.getElementById('hintBar').textContent = '将鼠标悬停在格子上查看风险提示';
+  document.getElementById('hintBar').innerHTML = '悬停查看策略提示 | <span class="phase-badge">中央启动</span>';
   stopFireworks();
   initGrid();
   renderGrid();
