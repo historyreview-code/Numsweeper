@@ -17,7 +17,7 @@
     padding: 20px;
     overflow: hidden;
   }
-  .game-wrapper {
+  .game-wrapper { contain: layout style;
     text-align: center;
     position: relative;
     z-index: 1;
@@ -98,7 +98,8 @@
   }
   .hint-bar .highlight { color: #fbbf24; font-weight: 600; }
   .hint-bar .danger { color: #ef4444; font-weight: 600; }
-  .grid-container {
+  .grid-canvas { display: inline-block; border-radius: 16px; border: 1px solid rgba(255,255,255,0.06); max-width: 100%; height: auto; touch-action: manipulation; }
+.grid-container { contain: layout;
     display: inline-grid;
     grid-template-columns: repeat(10, 1fr);
     gap: 3px;
@@ -396,7 +397,7 @@
     <button class="btn-new" onclick="resetGame()">新游戏</button>
   </div>
   <div class="hint-bar" id="hintBar">悬停查看策略提示 | <span class="phase-badge">中央启动</span></div>
-  <div class="grid-container" id="grid"></div>
+  <canvas class="grid-canvas" id="gridCanvas" width="596" height="596"></canvas>
   <div class="legend">
     <div class="legend-item"><div class="legend-dot" style="background:#4ade80;box-shadow:0 0 6px rgba(74,222,128,0.4)"></div>强烈推荐</div>
     <div class="legend-item"><div class="legend-dot" style="background:#facc15;box-shadow:0 0 6px rgba(250,204,21,0.3)"></div>可以点击</div>
@@ -421,6 +422,7 @@
     <button class="btn-new" onclick="resetGame()" style="margin-top:24px">再来一局</button>
   </div>
 </div>
+
 <script>
 const SIZE = 10;
 const THRESHOLD = 250;
@@ -637,11 +639,7 @@ function shuffle(arr) {
 }
 
 function getSimScore(g, r, row, col) {
-  const nbrs = [];
-  if (row > 0) nbrs.push([row - 1, col]);
-  if (row < SIZE - 1) nbrs.push([row + 1, col]);
-  if (col > 0) nbrs.push([row, col - 1]);
-  if (col < SIZE - 1) nbrs.push([row, col + 1]);
+  const nbrs = NEIGHBORS[row][col];
   const revSum = nbrs.reduce((s, [nr, nc]) => s + (r[nr][nc] ? g[nr][nc] : 0), 0);
   const maxSafe = THRESHOLD - revSum;
   const hidden = [];
@@ -660,11 +658,7 @@ function getSimScore(g, r, row, col) {
 
 function simulateMoveState(g, r, row, col) {
   const val = g[row][col];
-  const nbrs = [];
-  if (row > 0) nbrs.push([row - 1, col]);
-  if (row < SIZE - 1) nbrs.push([row + 1, col]);
-  if (col > 0) nbrs.push([row, col - 1]);
-  if (col < SIZE - 1) nbrs.push([row, col + 1]);
+  const nbrs = NEIGHBORS[row][col];
   let sum = val;
   for (const [nr, nc] of nbrs) { if (r[nr][nc]) sum += g[nr][nc]; }
   return { safe: sum <= THRESHOLD, sum };
@@ -733,38 +727,41 @@ function compareStrategies() {
 
 function batchSimulate(count) {
   const el = document.getElementById('strategyResult');
-  el.textContent = '模拟中...';
-
-  setTimeout(() => {
-    let total25 = 0, totalBL = 0;
-    let wins25 = 0, winsBL = 0, ties = 0;
-
-    for (let i = 0; i < count; i++) {
-      const nums = shuffle(Array.from({ length: 100 }, (_, j) => j + 1));
-      const g = [];
-      const r = [];
-      for (let row = 0; row < SIZE; row++) {
-        g[row] = nums.slice(row * SIZE, (row + 1) * SIZE);
-        r[row] = Array(SIZE).fill(false);
-      }
-
-      const s25 = runStrategy(g, r, 'v25');
-
-      const g2 = g.map(row => [...row]);
-      const r2 = r.map(row => [...row]);
-      const sBL = runStrategy(g2, r2, 'border-last');
-
-      total25 += s25;
-      totalBL += sBL;
-      if (s25 > sBL) wins25++;
-      else if (sBL > s25) winsBL++;
-      else ties++;
+  el.textContent = '模拟中 0/' + count;
+  let total25 = 0, totalBL = 0;
+  let wins25 = 0, winsBL = 0, ties = 0;
+  let done = 0;
+  const BATCH = 4;
+  function runOne() {
+    const nums = shuffle(Array.from({ length: 100 }, (_, j) => j + 1));
+    const g = [], r = [];
+    for (let row = 0; row < SIZE; row++) {
+      g[row] = nums.slice(row * SIZE, (row + 1) * SIZE);
+      r[row] = Array(SIZE).fill(false);
     }
-
-    const avg25 = (total25 / count).toFixed(1);
-    const avgBL = (totalBL / count).toFixed(1);
-    el.innerHTML = `x${count} | v2.5 <span class="highlight">${avg25}</span> vs BL <span class="highlight">${avgBL}</span> | 胜率 <span class="win">${wins25}</span>:<span class="lose">${winsBL}</span>:${ties}`;
-  }, 10);
+    const s25 = runStrategy(g, r, 'v25');
+    const g2 = g.map(row => [...row]);
+    const r2 = r.map(row => [...row]);
+    const sBL = runStrategy(g2, r2, 'border-last');
+    total25 += s25; totalBL += sBL;
+    if (s25 > sBL) wins25++;
+    else if (sBL > s25) winsBL++;
+    else ties++;
+    done++;
+  }
+  function processBatch() {
+    const end = Math.min(done + BATCH, count);
+    while (done < end) runOne();
+    if (done < count) {
+      el.textContent = '模拟中 ' + done + '/' + count;
+      requestAnimationFrame(processBatch);
+    } else {
+      const avg25 = (total25 / count).toFixed(1);
+      const avgBL = (totalBL / count).toFixed(1);
+      el.innerHTML = 'x' + count + ' | v2.5 <span class="highlight">' + avg25 + '</span> vs BL <span class="highlight">' + avgBL + '</span> | 胜率 <span class="win">' + wins25 + '</span>:<span class="lose">' + winsBL + '</span>:' + ties;
+    }
+  }
+  requestAnimationFrame(processBatch);
 }
 
 function initGrid() {
@@ -780,14 +777,22 @@ function initGrid() {
   blPhase = 'center';
 }
 
-function getNeighbors(r, c) {
-  const n = [];
-  if (r > 0) n.push([r - 1, c]);
-  if (r < SIZE - 1) n.push([r + 1, c]);
-  if (c > 0) n.push([r, c - 1]);
-  if (c < SIZE - 1) n.push([r, c + 1]);
-  return n;
-}
+const NEIGHBORS = function() {
+  const tbl = [];
+  for (let rr = 0; rr < 10; rr++) {
+    tbl[rr] = [];
+    for (let cc = 0; cc < 10; cc++) {
+      const n = [];
+      if (rr > 0) n.push([rr - 1, cc]);
+      if (rr < 9) n.push([rr + 1, cc]);
+      if (cc > 0) n.push([rr, cc - 1]);
+      if (cc < 9) n.push([rr, cc + 1]);
+      tbl[rr][cc] = n;
+    }
+  }
+  return tbl;
+}();
+function getNeighbors(r, c) { return NEIGHBORS[r][c]; }
 
 function revealedSum(r, c) {
   return getNeighbors(r, c).reduce((s, [nr, nc]) => s + (revealed[nr][nc] ? grid[nr][nc] : 0), 0);
@@ -883,11 +888,6 @@ function findBestMoves() {
   return { bestScore, moves: new Set(moves.map(([r, c]) => r * SIZE + c)) };
 }
 
-function getColorForValue(v) {
-  const t = (v - 1) / 99;
-  const h = 120 - t * 120;
-  return `hsl(${h}, 70%, ${45 + t * 15}%)`;
-}
 
 function getHiddenNumbers() {
   const hidden = [];
@@ -940,93 +940,227 @@ function renderDistPanel() {
   panel.innerHTML = gridHtml + statsHtml;
 }
 
+// ===================================================================
+// CANVAS RENDERER
+// ===================================================================
+let canvas, ctx;
+let canvasHoverR = -1, canvasHoverC = -1;
+const CELL_SIZE = 56;
+const GAP = 3;
+const PADDING = 4;
+const GRID_OFFSET = PADDING;
+const COLORS_REVEALED = ['#1e3a5f','#1a3a4a','#163d3d','#1a3a30','#1e3a2e','#2a3a1e','#3a3a1e','#3a2e1e','#3a1e1e','#3a1e2e'];
+
+function getCtx() {
+  if (!canvas) { canvas = document.getElementById('gridCanvas'); ctx = canvas.getContext('2d'); }
+  return ctx;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
 function renderGrid() {
-  const container = document.getElementById('grid');
-  container.innerHTML = '';
-  const bestMoves = gameOver ? { moves: new Set() } : findBestMoves();
-
+  const c = getCtx();
+  const w = canvas.width, h = canvas.height;
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = 'rgba(255,255,255,0.03)';
+  roundRect(c, 0, 0, w, h, 16);
+  c.fill();
+  c.strokeStyle = 'rgba(255,255,255,0.06)';
+  roundRect(c, 0, 0, w, h, 16);
+  c.stroke();
+  let bestMovesSet = null, doomedSet = null, urgentTargets = null;
+  if (!gameOver) {
+    const bm = findBestMovesCached();
+    bestMovesSet = bm.moves;
+    doomedSet = bm.doomed;
+    urgentTargets = bm.urgent;
+  }
   for (let r = 0; r < SIZE; r++) {
-    for (let c = 0; c < SIZE; c++) {
-      const cell = document.createElement('button');
-      cell.className = 'cell';
-      cell.dataset.row = r;
-      cell.dataset.col = c;
-
-      const valSpan = document.createElement('span');
-      valSpan.className = 'cell-value';
-
-      const hintSpan = document.createElement('span');
-      hintSpan.className = 'cell-hint';
-
-      if (revealed[r][c]) {
-        cell.classList.add('revealed');
-        const color = getColorForValue(grid[r][c]);
-        cell.style.setProperty('--cell-bg', color);
-        cell.style.setProperty('--cell-border', color);
-        valSpan.textContent = grid[r][c];
-      } else if (!gameOver) {
-        valSpan.textContent = '?';
-        const known = revealedSum(r, c);
-        if (known > 0) {
-          hintSpan.textContent = known;
-          hintSpan.classList.add('show');
-        }
-
-        const strat = cellStrategicScore(r, c);
-        const scoreIdx = Math.round(strat.score * 100);
-
-        const scoreSpan = document.createElement('span');
-        scoreSpan.className = 'cell-score';
-        scoreSpan.textContent = scoreIdx;
-        cell.appendChild(scoreSpan);
-
-        const riskClass = getScoreRiskClass(strat.score);
-        if (riskClass) cell.classList.add(riskClass);
-
-        if (strat.isDoomed) {
-          cell.classList.add('doomed');
-        } else if (bestMoves.moves.has(r * SIZE + c)) {
-          cell.classList.add('best-move');
-        }
-
-        if ((blPhase === 'center' || blPhase === 'inner') && !isInnerCell(r, c)) {
-          cell.classList.add('outer-dimmed');
-        }
-
-        const neighbors = getNeighbors(r, c);
-        for (const [nr, nc] of neighbors) {
-          if (revealed[nr][nc] && grid[nr][nc] >= 85) {
-            cell.classList.add('urgent-target');
-            break;
-          }
-        }
+    for (let cc = 0; cc < SIZE; cc++) {
+      const x = GRID_OFFSET + cc * (CELL_SIZE + GAP);
+      const y = GRID_OFFSET + r * (CELL_SIZE + GAP);
+      const rev = revealed[r][cc];
+      const val = grid[r][cc];
+      const idx = r * SIZE + cc;
+      if (rev) {
+        c.fillStyle = COLORS_REVEALED[Math.min(Math.floor(val / 10), 9)];
+      } else if (canvasHoverR === r && canvasHoverC === cc && !gameOver) {
+        c.fillStyle = 'rgba(51,65,85,0.6)';
       } else {
-        valSpan.textContent = grid[r][c];
-        valSpan.style.color = 'rgba(255,255,255,0.3)';
+        c.fillStyle = 'rgba(30,41,59,0.6)';
       }
-
-      if (explodedCell && r === explodedCell[0] && c === explodedCell[1]) {
-        cell.classList.add('exploded');
+      let borderColor = 'rgba(255,255,255,0.08)';
+      let borderWidth = 1;
+      let shadow = null;
+      if (!gameOver && !rev) {
+        if (doomedSet && doomedSet.has(idx)) { borderColor = 'rgba(239,68,68,0.7)'; borderWidth = 2; }
+        else if (bestMovesSet && bestMovesSet.has(idx)) { borderColor = 'rgba(251,191,36,0.8)'; borderWidth = 2; shadow = 'rgba(251,191,36,0.35)'; }
+        if (urgentTargets && urgentTargets.has(idx)) { borderColor = 'rgba(255,100,50,0.6)'; borderWidth = 2; }
+        if ((blPhase === 'center' || blPhase === 'inner') && !isInnerCell(r, cc)) c.globalAlpha = 0.4;
       }
-
-      cell.appendChild(valSpan);
-      cell.appendChild(hintSpan);
-
-      if (!gameOver) {
-        cell.addEventListener('click', () => clickCell(r, c));
-        cell.addEventListener('mouseenter', () => hoverCell(r, c, cell));
-        cell.addEventListener('mouseleave', () => unhoverCell(r, c, cell));
+      roundRect(c, x, y, CELL_SIZE, CELL_SIZE, 8);
+      c.fill();
+      if (shadow) {
+        c.save();
+        c.shadowColor = shadow;
+        c.shadowBlur = 16;
+        roundRect(c, x, y, CELL_SIZE, CELL_SIZE, 8);
+        c.fill();
+        c.restore();
       }
-
-      container.appendChild(cell);
+      c.strokeStyle = borderColor;
+      c.lineWidth = borderWidth;
+      roundRect(c, x, y, CELL_SIZE, CELL_SIZE, 8);
+      c.stroke();
+      c.globalAlpha = 1;
+      if (rev || gameOver) {
+        c.fillStyle = '#e2e8f0';
+        c.font = 'bold 20px -apple-system, sans-serif';
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText(val, x + CELL_SIZE / 2, y + CELL_SIZE / 2 - 4);
+        c.fillStyle = 'rgba(255,255,255,0.4)';
+        c.font = '10px -apple-system, sans-serif';
+        c.fillText('#' + val, x + CELL_SIZE / 2, y + CELL_SIZE - 10);
+      } else {
+        c.fillStyle = 'rgba(255,255,255,0.2)';
+        c.font = '20px -apple-system, sans-serif';
+        c.fillText('?', x + CELL_SIZE / 2, y + CELL_SIZE / 2);
+      }
+      if (explodedCell && r === explodedCell[0] && cc === explodedCell[1]) {
+        c.fillStyle = 'rgba(255,68,68,0.3)';
+        c.font = '28px sans-serif';
+        c.fillText('💥', x + CELL_SIZE / 2, y + CELL_SIZE / 2 + 4);
+      }
+      if (!gameOver && !rev && doomedSet && doomedSet.has(idx)) {
+        c.fillStyle = 'rgba(239,68,68,0.5)';
+        c.font = '22px sans-serif';
+        c.fillText('✕', x + CELL_SIZE / 2, y + CELL_SIZE / 2);
+      }
+      if (!gameOver && !rev && bestMovesSet && bestMovesSet.has(idx)) {
+        const strat = cellStrategicScore(r, cc);
+        if (strat && strat.score > 0) {
+          c.fillStyle = 'rgba(255,255,255,0.45)';
+          c.font = '9px -apple-system, sans-serif';
+          c.textAlign = 'right';
+          c.textBaseline = 'top';
+          c.fillText((strat.score * 100).toFixed(0), x + CELL_SIZE - 4, y + 2);
+        }
+      }
     }
   }
-  if (gameOver) {
-    document.querySelectorAll('.cell').forEach(c => c.classList.add('game-over'));
+  if (canvasHoverR >= 0 && !gameOver) {
+    const nbrs = getNeighbors(canvasHoverR, canvasHoverC);
+    for (const [nr, nc] of nbrs) {
+      if (revealed[nr][nc]) {
+        const nx = GRID_OFFSET + nc * (CELL_SIZE + GAP);
+        const ny = GRID_OFFSET + nr * (CELL_SIZE + GAP);
+        c.fillStyle = 'rgba(251,191,36,0.15)';
+        roundRect(c, nx, ny, CELL_SIZE, CELL_SIZE, 8);
+        c.fill();
+      }
+    }
   }
   document.getElementById('score').textContent = score;
 }
 
+function getCanvasCell(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (clientX - rect.left) * scaleX;
+  const my = (clientY - rect.top) * scaleY;
+  const col = Math.floor((mx - GRID_OFFSET) / (CELL_SIZE + GAP));
+  const row = Math.floor((my - GRID_OFFSET) / (CELL_SIZE + GAP));
+  if (row >= 0 && row < SIZE && col >= 0 && col < SIZE) {
+    const cx = GRID_OFFSET + col * (CELL_SIZE + GAP);
+    const cy = GRID_OFFSET + row * (CELL_SIZE + GAP);
+    if (mx >= cx && mx <= cx + CELL_SIZE && my >= cy && my <= cy + CELL_SIZE) return [row, col];
+  }
+  return null;
+}
+
+function findBestMovesCached() {
+  const moves = new Set(), doomed = new Set(), urgent = new Set();
+  for (let r = 0; r < SIZE; r++) {
+    for (let cc = 0; cc < SIZE; cc++) {
+      if (revealed[r][cc]) continue;
+      const prob = cellSafetyProbability(r, cc);
+      if (prob.isGuaranteed) moves.add(r * SIZE + cc);
+      if (prob.isDoomed) doomed.add(r * SIZE + cc);
+    }
+  }
+  if (moves.size > 0) return { moves, doomed, urgent };
+  let bestScore = -1;
+  for (let r = 0; r < SIZE; r++) {
+    for (let cc = 0; cc < SIZE; cc++) {
+      if (revealed[r][cc]) continue;
+      if ((blPhase === 'center' || blPhase === 'inner') && !isInnerCell(r, cc)) continue;
+      const s = cellStrategicScore(r, cc);
+      if (s.score > bestScore) { bestScore = s.score; moves.clear(); moves.add(r * SIZE + cc); }
+      else if (s.score === bestScore && s.score > 0) moves.add(r * SIZE + cc);
+    }
+  }
+  if (moves.size === 0 && blPhase === 'inner') { blPhase = 'border'; return findBestMovesCached(); }
+  for (let r = 0; r < SIZE; r++) {
+    for (let cc = 0; cc < SIZE; cc++) {
+      if (revealed[r][cc]) continue;
+      const nbrs = getNeighbors(r, cc);
+      for (const [nr, nc] of nbrs) {
+        if (revealed[nr][nc] && grid[nr][nc] >= 85) { urgent.add(r * SIZE + cc); break; }
+      }
+    }
+  }
+  return { moves, doomed, urgent };
+}
+
+function setupCanvasEvents() {
+  if (!canvas) getCtx();
+  canvas.addEventListener('click', function(e) {
+    const cell = getCanvasCell(e.clientX, e.clientY);
+    if (cell) clickCell(cell[0], cell[1]);
+  });
+  canvas.addEventListener('mousemove', function(e) {
+    const cell = getCanvasCell(e.clientX, e.clientY);
+    if (cell) {
+      const [r, cc] = cell;
+      if (r !== canvasHoverR || cc !== canvasHoverC) {
+        canvasHoverR = r; canvasHoverC = cc;
+        renderGrid();
+        hoverCell(r, cc, null);
+      }
+    } else if (canvasHoverR >= 0) {
+      canvasHoverR = -1; canvasHoverC = -1;
+      renderGrid();
+      unhoverCell(-1, -1, null);
+    }
+  });
+  canvas.addEventListener('mouseleave', function() {
+    if (canvasHoverR >= 0) {
+      canvasHoverR = -1; canvasHoverC = -1;
+      renderGrid();
+      unhoverCell(-1, -1, null);
+    }
+  });
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const cell = getCanvasCell(touch.clientX, touch.clientY);
+    if (cell) clickCell(cell[0], cell[1]);
+  }, { passive: false });
+}
 function clickCell(r, c) {
   if (gameOver || revealed[r][c]) return;
 
@@ -1082,15 +1216,10 @@ function clickCell(r, c) {
 
 function hoverCell(r, c, cellEl) {
   if (gameOver || revealed[r][c]) return;
-
   const neighbors = getNeighbors(r, c);
-  document.querySelectorAll('.cell.neighbor-highlight').forEach(el => el.classList.remove('neighbor-highlight'));
-
   let neighborList = [];
   for (const [nr, nc] of neighbors) {
-    const nEl = document.querySelector(`.cell[data-row="${nr}"][data-col="${nc}"]`);
-    if (nEl && revealed[nr][nc]) {
-      nEl.classList.add('neighbor-highlight');
+    if (revealed[nr][nc]) {
       neighborList.push(grid[nr][nc]);
     }
   }
@@ -1114,7 +1243,6 @@ function hoverCell(r, c, cellEl) {
 }
 
 function unhoverCell(r, c, cellEl) {
-  document.querySelectorAll('.cell.neighbor-highlight').forEach(el => el.classList.remove('neighbor-highlight'));
   const hidden = getHiddenNumbers();
   const endgame = hidden.length > 0 && hidden.length < 10 ? `<span class="endgame-badge">残局${hidden.length}格</span>` : '';
   document.getElementById('hintBar').innerHTML = `悬停查看策略提示 | ${phaseBadgeHTML()} ${endgame}`;
@@ -1131,10 +1259,12 @@ function resetGame() {
 }
 
 initGrid();
+setupCanvasEvents();
 renderGrid();
 renderDistPanel();
 initFireworks();
 setTimeout(() => speak(INTRO_TEXT), 600);
+
 </script>
 </body>
 </html>
