@@ -447,6 +447,8 @@ let gameOver = false;
 let score = 0;
 let explodedCell = null;
 let gameWon = false;
+let stateDangerMap = null;
+let stateDangerCount = 0;
 let blPhase = 'center';
 
 // Undo history
@@ -829,83 +831,90 @@ function getDangerLabel(risk) {
 }
 
 function showWinOverlay() {
-  const { map: dangerMap, maxVal } = computeDangerCells();
-  
-  // Redraw grid with danger overlay
+  const dangerData = computeDangerCells();
+  const dangerMap = dangerData.map;
+  stateDangerMap = dangerMap;
+
+  // Render base grid
   renderGrid();
 
-  // Add danger heatmap on top of canvas
-  const c = getCtx();
-  const ctx = c;
-  for (let r = 0; r < SIZE; r++) {
-    for (let cc = 0; cc < SIZE; cc++) {
-      const risk = dangerMap[r][cc];
-      const color = getDangerColor(risk);
-      if (!color) continue;
-      
-      const x = GRID_OFFSET + cc * (CELL_SIZE + GAP);
-      const y = GRID_OFFSET + r * (CELL_SIZE + GAP);
-      
-      // Danger glow
-      ctx.fillStyle = color;
-      roundRect(ctx, x, y, CELL_SIZE, CELL_SIZE, 8);
-      ctx.fill();
-      
-      // Pulsing border
-      const intensity = Math.min(1, (risk - 180) / 120);
-      const borderR = Math.round(239 * intensity + 234 * (1 - intensity));
-      const borderG = Math.round(68 * intensity);
-      const borderB = Math.round(68 * intensity);
-      ctx.strokeStyle = 'rgba(' + borderR + ',' + borderG + ',' + borderB + ',0.6)';
-      ctx.lineWidth = 2;
-      roundRect(ctx, x, y, CELL_SIZE, CELL_SIZE, 8);
-      ctx.stroke();
-    }
-  }
-  
-  // Count danger cells
+  // Draw danger heatmap overlay on canvas
+  drawDangerHeatmap(dangerMap);
+
+  // Count & max
   let dangerCount = 0;
-  for (let r = 0; r < SIZE; r++) {
-    for (let cc = 0; cc < SIZE; cc++) {
-      if (getDangerColor(dangerMap[r][cc])) dangerCount++;
-    }
-  }
-  
-  // Find the most dangerous cell
   let maxRisk = -1, maxRC = null;
   for (let r = 0; r < SIZE; r++) {
     for (let cc = 0; cc < SIZE; cc++) {
+      if (getDangerColor(dangerMap[r][cc])) dangerCount++;
       if (dangerMap[r][cc] > maxRisk) { maxRisk = dangerMap[r][cc]; maxRC = [r, cc]; }
     }
   }
-  
-  // Update hint bar with celebration
+
+  stateDangerCount = dangerCount;
+
+  // Update hint bar
   document.getElementById('hintBar').innerHTML = 
-    '🎉 完美通关！' + dangerCount + '个危险单元格被成功规避！';
-  
+    '🎉 完美通关！共<strong>' + dangerCount + '</strong>个危险单元格被成功规避 <span class="phase-badge" style="background:rgba(239,68,68,0.2);color:#fca5a5">点击格子查看详情</span>';
+
   // Show win overlay
   const overlay = document.getElementById('overlay');
   const detail = document.getElementById('explosionDetail');
   const finalScore = document.getElementById('finalScore');
   const h2 = overlay.querySelector('h2');
-  
+
   h2.textContent = '🎉 完美通关！';
-  let dangerSummary = '成功避开 <strong>' + dangerCount + '</strong> 个危险单元格！';
+  let dangerSummary = '你成功避开了 <strong>' + dangerCount + '</strong> 个危险单元格！';
   if (maxRC) {
-    const val = grid[maxRC[0]][maxRC[1]];
-    const nbrs = getNeighbors(maxRC[0], maxRC[1]);
-    const nbrVals = nbrs.map(([nr, nc]) => grid[nr][nc]);
-    dangerSummary += '<br>最危险: (' + (maxRC[0]+1) + ',' + (maxRC[1]+1) + ') = ' + val + ' + [' + nbrVals.join(',') + '] = ' + maxRisk;
+    dangerSummary += '<br>🏆 最危险: (' + (maxRC[0]+1) + ',' + (maxRC[1]+1) + ') 风险值 ' + maxRisk;
   }
-  detail.innerHTML = dangerSummary;
-  finalScore.textContent = '100';
+  detail.innerHTML = dangerSummary
+    + '<br><br><button class="btn-new" onclick="closeWinOverlay()" style="background:rgba(99,102,241,0.6);font-size:13px;padding:10px 24px">🗺 查看危险地图</button>';
+  finalScore.textContent = '100 / 100';
   overlay.style.display = 'flex';
-  
-  // Victory sound
+
   speak('完美通关！');
-  
-  // Trigger celebratory firework
   launchFireworks();
+}
+
+function closeWinOverlay() {
+  document.getElementById('overlay').style.display = 'none';
+  // Keep heatmap visible
+}
+
+function drawDangerHeatmap(dangerMap) {
+  if (!dangerMap) return;
+  const ctx = getCtx();
+  for (let r = 0; r < SIZE; r++) {
+    for (let cc = 0; cc < SIZE; cc++) {
+      const risk = dangerMap[r][cc];
+      const color = getDangerColor(risk);
+      if (!color) continue;
+
+      const x = GRID_OFFSET + cc * (CELL_SIZE + GAP);
+      const y = GRID_OFFSET + r * (CELL_SIZE + GAP);
+
+      // Glow fill
+      ctx.fillStyle = color;
+      roundRect(ctx, x, y, CELL_SIZE, CELL_SIZE, 8);
+      ctx.fill();
+
+      // Border glow - intensity based on risk
+      const intensity = Math.min(1, (risk - 180) / 120);
+      const br = Math.round(239 * intensity + 234 * (1 - intensity));
+      ctx.strokeStyle = 'rgba(' + br + ',68,68,0.6)';
+      ctx.lineWidth = 2 + Math.round(intensity * 2);
+      roundRect(ctx, x, y, CELL_SIZE, CELL_SIZE, 8);
+      ctx.stroke();
+
+      // Show risk number on the cell
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.font = 'bold 13px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('☢ ' + risk, x + CELL_SIZE / 2, y + CELL_SIZE - 16);
+    }
+  }
 }
 
 function initGrid() {
@@ -917,6 +926,8 @@ function initGrid() {
   revealed = Array.from({length: SIZE}, () => Array(SIZE).fill(false));
   gameOver = false;
   gameWon = false;
+  stateDangerMap = null;
+  stateDangerCount = 0;
   score = 0;
   explodedCell = null;
   blPhase = 'center';
@@ -1284,7 +1295,19 @@ function setupCanvasEvents() {
       if (r !== canvasHoverR || cc !== canvasHoverC) {
         canvasHoverR = r; canvasHoverC = cc;
         renderGrid();
-        hoverCell(r, cc, null);
+        if (gameWon && stateDangerMap) {
+          drawDangerHeatmap(stateDangerMap);
+          const risk = stateDangerMap[r][cc];
+          const label = getDangerLabel(risk);
+          const rval = grid[r][cc];
+          const nbrs = getNeighbors(r, cc);
+          const total = nbrs.reduce(function(s, [nr,nc]) { return s + grid[nr][nc]; }, 0);
+          const pc = Math.round(risk / 250 * 100);
+          document.getElementById('hintBar').innerHTML =
+            '🎉 完美通关 | (' + (r+1) + ',' + (cc+1) + ') 数值=' + rval + ' 邻居和=' + total + ' 风险=' + risk + ' (' + pc + '%) ' + label;
+        } else {
+          hoverCell(r, cc, null);
+        }
       }
     } else if (canvasHoverR >= 0) {
       canvasHoverR = -1; canvasHoverC = -1;
@@ -1296,7 +1319,12 @@ function setupCanvasEvents() {
     if (canvasHoverR >= 0) {
       canvasHoverR = -1; canvasHoverC = -1;
       renderGrid();
-      unhoverCell(-1, -1, null);
+      if (gameWon && stateDangerMap) {
+        drawDangerHeatmap(stateDangerMap);
+        document.getElementById('hintBar').innerHTML = '🎉 完美通关！共<strong>' + stateDangerCount + '</strong>个危险单元格被成功规避 <span class="phase-badge" style="background:rgba(239,68,68,0.2);color:#fca5a5">悬停查看详情</span>';
+      } else {
+        unhoverCell(-1, -1, null);
+      }
     }
   });
   canvas.addEventListener('touchstart', function(e) {
@@ -1414,6 +1442,7 @@ function unhoverCell(r, c, cellEl) {
 
 function resetGame() {
   gameWon = false;
+  stateDangerMap = null;
   undoStack = [];
   updateUndoBtn();
   document.getElementById('overlay').style.display = 'none';
