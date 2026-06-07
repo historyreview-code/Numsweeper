@@ -367,6 +367,20 @@
     transition: background 0.15s, color 0.15s;
   }
   .btn-strategy:hover { background: rgba(255,255,255,0.12); color: #e2e8f0; }
+
+  .btn-undo {
+    background: rgba(99, 102, 241, 0.2);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    color: #a5b4fc;
+    padding: 5px 14px;
+    font-size: 11px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .btn-undo:active { transform: scale(0.93); }
+  .btn-undo:disabled { opacity: 0.3; cursor: default; transform: none; }
+
   .strategy-result {
     font-size: 12px;
     color: #64748b;
@@ -394,6 +408,7 @@
       <div class="score-label">已翻开</div>
       <div class="score-value"><span id="score">0</span><span class="total">/100</span></div>
     </div>
+    <button class="btn-new" id="undoBtn" onclick="undoLastMove()" disabled style="opacity:0.4">↩ 撤回</button>
     <button class="btn-new" onclick="resetGame()">新游戏</button>
   </div>
   <div class="hint-bar" id="hintBar">悬停查看策略提示 | <span class="phase-badge">中央启动</span></div>
@@ -419,7 +434,7 @@
     <div class="explosion-detail" id="explosionDetail"></div>
     <div class="final-score" id="finalScore">0</div>
     <div style="color:#64748b;font-size:14px;margin-top:4px">个格子被安全翻开</div>
-    <button class="btn-new" onclick="resetGame()" style="margin-top:24px">再来一局</button>
+    <button class="btn-new" onclick="resetGame()" style="margin-top:24px">再来一局</button><br><button class="btn-strategy" onclick="resetGame()" style="margin-top:8px">新游戏</button>
   </div>
 </div>
 
@@ -432,6 +447,12 @@ let gameOver = false;
 let score = 0;
 let explodedCell = null;
 let blPhase = 'center';
+
+// Undo history
+const MAX_UNDO = 10;
+let undoStack = [];
+let undoBtn = null;
+
 
 let audioCtx = null;
 function ensureAudio() {
@@ -1164,6 +1185,19 @@ function setupCanvasEvents() {
 function clickCell(r, c) {
   if (gameOver || revealed[r][c]) return;
 
+  // Save undo state before moving
+  undoStack.push({
+    r, c,
+    oldRevealed: revealed[r][c],
+    oldScore: score - 0,
+    oldGameOver: gameOver,
+    oldExploded: explodedCell,
+    revealedSnapshot: revealed.map(row => [...row]),
+    blPhase: blPhase
+  });
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  updateUndoBtn();
+
   playClickSound();
 
   revealed[r][c] = true;
@@ -1249,6 +1283,8 @@ function unhoverCell(r, c, cellEl) {
 }
 
 function resetGame() {
+  undoStack = [];
+  updateUndoBtn();
   document.getElementById('overlay').style.display = 'none';
   document.getElementById('hintBar').innerHTML = '悬停查看策略提示 | <span class="phase-badge">中央启动</span>';
   stopFireworks();
@@ -1256,6 +1292,49 @@ function resetGame() {
   renderGrid();
   renderDistPanel();
   speak(INTRO_TEXT);
+}
+
+
+function updateUndoBtn() {
+  if (!undoBtn) undoBtn = document.getElementById('undoBtn');
+  if (!undoBtn) return;
+  const canUndo = undoStack.length > 0 && !gameOver;
+  undoBtn.disabled = !canUndo;
+  undoBtn.style.opacity = canUndo ? '1' : '0.4';
+  undoBtn.textContent = '↩ 撤回' + (undoStack.length > 0 ? ' (' + undoStack.length + ')' : '');
+}
+
+function undoLastMove() {
+  if (undoStack.length === 0 || gameOver) return;
+
+  const state = undoStack.pop();
+
+  // Restore the revealed state
+  for (let rr = 0; rr < SIZE; rr++) {
+    for (let cc = 0; cc < SIZE; cc++) {
+      revealed[rr][cc] = state.revealedSnapshot[rr][cc];
+    }
+  }
+
+  // Restore other state
+  score = state.oldScore;
+  gameOver = state.oldGameOver;
+  explodedCell = state.oldExploded;
+  blPhase = state.blPhase;
+
+  // Clear fireworks
+  stopFireworks();
+
+  // If overlay is showing, hide it
+  document.getElementById('overlay').style.display = 'none';
+
+  // Remove shake class
+  document.getElementById('gameWrapper').classList.remove('shake');
+
+  updateUndoBtn();
+  renderGrid();
+  renderDistPanel();
+  playClickSound();
 }
 
 initGrid();
