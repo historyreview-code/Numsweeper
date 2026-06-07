@@ -434,7 +434,7 @@
     <div class="explosion-detail" id="explosionDetail"></div>
     <div class="final-score" id="finalScore">0</div>
     <div style="color:#64748b;font-size:14px;margin-top:4px">个格子被安全翻开</div>
-    <button class="btn-new" onclick="resetGame()" style="margin-top:24px">再来一局</button><br><button class="btn-strategy" onclick="resetGame()" style="margin-top:8px">新游戏</button>
+    <button class="btn-new" onclick="closeExplosionReview()" style="background:rgba(239,68,68,0.4);font-size:13px;padding:10px 24px;margin-top:8px">🗺 查看爆炸复盘</button><br><button class="btn-new" onclick="resetGame()" style="margin-top:24px">再来一局</button><br><button class="btn-strategy" onclick="resetGame()" style="margin-top:8px">新游戏</button>
   </div>
 </div>
 
@@ -446,6 +446,7 @@ let revealed = [];
 let gameOver = false;
 let score = 0;
 let explodedCell = null;
+let explosionReviewData = null;
 let gameWon = false;
 let stateDangerMap = null;
 let stateDangerCount = 0;
@@ -917,6 +918,95 @@ function drawDangerHeatmap(dangerMap) {
   }
 }
 
+
+function drawExplosionHeatmap() {
+  if (!explosionReviewData) return;
+  const ctx = getCtx();
+  const [er, ec] = explosionReviewData.triggeredCell;
+
+  // 1. Mark contributed neighbors (the ones that added to the explosion sum)
+  for (let i = 0; i < explosionReviewData.contributedNeighbors.length; i++) {
+    const [nr, nc, nv] = explosionReviewData.contributedNeighbors[i];
+    const x = GRID_OFFSET + nc * (CELL_SIZE + GAP);
+    const y = GRID_OFFSET + nr * (CELL_SIZE + GAP);
+    ctx.fillStyle = 'rgba(249,115,22,0.3)';
+    roundRect(ctx, x, y, CELL_SIZE, CELL_SIZE, 8);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(249,115,22,0.7)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, x, y, CELL_SIZE, CELL_SIZE, 8);
+    ctx.stroke();
+    // Show contributed value
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.font = 'bold 11px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('+' + nv, x + CELL_SIZE / 2, y + CELL_SIZE - 4);
+  }
+
+  // 2. Compute and mark all theoretical mine cells
+  // A mine cell = one where value + sum(all 4 neighbors) > THRESHOLD at full reveal
+  let mineCount = 0;
+  for (let r = 0; r < SIZE; r++) {
+    for (let cc = 0; cc < SIZE; cc++) {
+      // Skip the exploded cell itself and its contributed neighbors (already marked)
+      if (r === er && cc === ec) continue;
+      let isContributor = false;
+      for (let i = 0; i < explosionReviewData.contributedNeighbors.length; i++) {
+        if (r === explosionReviewData.contributedNeighbors[i][0] && cc === explosionReviewData.contributedNeighbors[i][1]) {
+          isContributor = true; break;
+        }
+      }
+      if (isContributor) continue;
+
+      const val = grid[r][cc];
+      const nbrs = getNeighbors(r, cc);
+      let sum = val;
+      for (let k = 0; k < nbrs.length; k++) {
+        sum += grid[nbrs[k][0]][nbrs[k][1]];
+      }
+
+      if (sum > THRESHOLD) {
+        mineCount++;
+        const x = GRID_OFFSET + cc * (CELL_SIZE + GAP);
+        const y = GRID_OFFSET + r * (CELL_SIZE + GAP);
+        const intensity = Math.min(1, (sum - 250) / 200);
+        const alpha = 0.15 + intensity * 0.25;
+        ctx.fillStyle = 'rgba(239,68,68,' + alpha + ')';
+        roundRect(ctx, x, y, CELL_SIZE, CELL_SIZE, 8);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(239,68,68,' + (0.3 + intensity * 0.4) + ')';
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, x, y, CELL_SIZE, CELL_SIZE, 8);
+        ctx.stroke();
+        // Mark with ⚠
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⚠', x + CELL_SIZE / 2, y + CELL_SIZE / 2 - 6);
+        ctx.font = '9px -apple-system, sans-serif';
+        ctx.fillText('' + sum, x + CELL_SIZE / 2, y + CELL_SIZE / 2 + 12);
+      }
+    }
+  }
+
+  // Update hint bar
+  document.getElementById('hintBar').innerHTML =
+    '💥 触雷复盘 | ' + explosionReviewData.triggeredValue + ' + [' + explosionReviewData.contributedNeighbors.map(function(n) { return n[2]; }).join(',') + '] = ' + explosionReviewData.totalSum
+    + ' > 250 | 理论雷区: <span class="danger">' + mineCount + '格</span>'
+    + ' | <span style="color:#94a3b8">悬停查看详情</span>';
+}
+
+function closeExplosionReview() {
+  document.getElementById('overlay').style.display = 'none';
+  // Redraw without overlay
+  renderGrid();
+  drawExplosionHeatmap();
+}
+
+// Override canvas hover to show explosion detail
+
 function initGrid() {
   const nums = shuffle(Array.from({length: 100}, (_, i) => i + 1));
   grid = [];
@@ -930,6 +1020,7 @@ function initGrid() {
   stateDangerCount = 0;
   score = 0;
   explodedCell = null;
+  explosionReviewData = null;
   blPhase = 'center';
 }
 
@@ -1295,7 +1386,10 @@ function setupCanvasEvents() {
       if (r !== canvasHoverR || cc !== canvasHoverC) {
         canvasHoverR = r; canvasHoverC = cc;
         renderGrid();
-        if (gameWon && stateDangerMap) {
+        if (gameOver && explosionReviewData) {
+          drawExplosionHeatmap();
+          hoverCell(r, cc, null);
+        } else if (gameWon && stateDangerMap) {
           drawDangerHeatmap(stateDangerMap);
           const risk = stateDangerMap[r][cc];
           const label = getDangerLabel(risk);
@@ -1316,6 +1410,13 @@ function setupCanvasEvents() {
     }
   });
   canvas.addEventListener('mouseleave', function() {
+    if (gameOver && explosionReviewData) {
+      canvasHoverR = -1; canvasHoverC = -1;
+      renderGrid();
+      drawExplosionHeatmap();
+      document.getElementById('hintBar').innerHTML = '💥 触雷复盘 | 悬停查看详情';
+      return;
+    }
     if (canvasHoverR >= 0) {
       canvasHoverR = -1; canvasHoverC = -1;
       renderGrid();
@@ -1366,6 +1467,15 @@ function clickCell(r, c) {
   if (sum > THRESHOLD) {
     gameOver = true;
     explodedCell = [r, c];
+    // Save explosion review data
+    explosionReviewData = {
+      triggeredCell: [r, c],
+      triggeredValue: value,
+      contributedNeighbors: revealedNeighbors.map(function(n) { return [n[0], n[1], grid[n[0]][n[1]]]; }),
+      neighborSum: revealedNeighbors.reduce(function(s, [nr,nc]) { return s + grid[nr][nc]; }, 0),
+      totalSum: sum,
+      revealedSnapshot: revealed.map(function(row) { return row.slice(); }),
+    };
     renderGrid();
     renderDistPanel();
 
@@ -1382,7 +1492,7 @@ function clickCell(r, c) {
       `<span>${formula} = ${sum}</span> > ${THRESHOLD}`;
     document.getElementById('finalScore').textContent = score - 1;
 
-    setTimeout(() => {
+    setTimeout(function() {
       for (let rr = 0; rr < SIZE; rr++) {
         for (let cc = 0; cc < SIZE; cc++) {
           revealed[rr][cc] = true;
@@ -1390,6 +1500,7 @@ function clickCell(r, c) {
       }
       renderGrid();
       renderDistPanel();
+      drawExplosionHeatmap();
       document.getElementById('overlay').style.display = 'flex';
     }, 1500);
 
@@ -1407,7 +1518,28 @@ function clickCell(r, c) {
 }
 
 function hoverCell(r, c, cellEl) {
-  if (gameOver || revealed[r][c]) return;
+  if (gameWon) return;
+  if (gameOver && !explosionReviewData) return;
+  if (gameOver && explosionReviewData && revealed[r][c]) {
+    // In explosion review mode: show mine detail on hover
+    const val = grid[r][c];
+    const nbrs = getNeighbors(r, c);
+    let sum = val;
+    for (let i = 0; i < nbrs.length; i++) sum += grid[nbrs[i][0]][nbrs[i][1]];
+    const isMine = sum > THRESHOLD;
+    const isTrigger = r === explosionReviewData.triggeredCell[0] && c === explosionReviewData.triggeredCell[1];
+    let isContributor = false;
+    for (let i = 0; i < explosionReviewData.contributedNeighbors.length; i++) {
+      if (r === explosionReviewData.contributedNeighbors[i][0] && c === explosionReviewData.contributedNeighbors[i][1]) { isContributor = true; break; }
+    }
+    var label = '(' + (r+1) + ',' + (c+1) + ') 值=' + val + ' 合=' + sum;
+    if (isTrigger) label += ' 💥 触雷点';
+    else if (isContributor) label += ' 🔥 引燃邻居';
+    else if (isMine) label += ' ⚠️ 理论雷区';
+    else label += ' ✅ 安全格';
+    document.getElementById('hintBar').innerHTML = label;
+    return;
+  }
   const neighbors = getNeighbors(r, c);
   let neighborList = [];
   for (const [nr, nc] of neighbors) {
@@ -1435,6 +1567,10 @@ function hoverCell(r, c, cellEl) {
 }
 
 function unhoverCell(r, c, cellEl) {
+  if (gameOver && explosionReviewData) {
+    document.getElementById('hintBar').innerHTML = '💥 触雷复盘 | 悬停查看详情';
+    return;
+  }
   const hidden = getHiddenNumbers();
   const endgame = hidden.length > 0 && hidden.length < 10 ? `<span class="endgame-badge">残局${hidden.length}格</span>` : '';
   document.getElementById('hintBar').innerHTML = `悬停查看策略提示 | ${phaseBadgeHTML()} ${endgame}`;
@@ -1443,6 +1579,7 @@ function unhoverCell(r, c, cellEl) {
 function resetGame() {
   gameWon = false;
   stateDangerMap = null;
+  explosionReviewData = null;
   undoStack = [];
   updateUndoBtn();
   document.getElementById('overlay').style.display = 'none';
