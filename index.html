@@ -446,6 +446,7 @@ let revealed = [];
 let gameOver = false;
 let score = 0;
 let explodedCell = null;
+let gameWon = false;
 let blPhase = 'center';
 
 // Undo history
@@ -785,6 +786,128 @@ function batchSimulate(count) {
   requestAnimationFrame(processBatch);
 }
 
+
+
+// Danger cell detection for win celebration
+function computeDangerCells() {
+  const dangerMap = [];
+  let minVal = Infinity, maxVal = -Infinity;
+  for (let r = 0; r < SIZE; r++) {
+    dangerMap[r] = [];
+    for (let c = 0; c < SIZE; c++) {
+      // Risk: value + sum(ALL 4 neighbors) — how close to 250 if every neighbor is revealed
+      const val = grid[r][c];
+      const nbrs = getNeighbors(r, c);
+      let sum = val;
+      for (const [nr, nc] of nbrs) {
+        sum += grid[nr][nc];
+      }
+      dangerMap[r][c] = sum;
+      if (sum < minVal) minVal = sum;
+      if (sum > maxVal) maxVal = sum;
+    }
+  }
+  return { map: dangerMap, minVal, maxVal };
+}
+
+function getDangerColor(risk) {
+  // risk ranges from ~4 to ~(100+99+98+97+96)=490
+  // Highlight cells where risk > 180
+  if (risk > 240) return 'rgba(239,68,68,0.45)';   // Extreme
+  if (risk > 220) return 'rgba(249,115,22,0.35)';  // High
+  if (risk > 200) return 'rgba(250,204,21,0.25)';  // Moderate-high
+  if (risk > 180) return 'rgba(234,179,8,0.15)';   // Moderate
+  return null; // Not dangerous
+}
+
+function getDangerLabel(risk) {
+  if (risk > 240) return '💀 极高风险';
+  if (risk > 220) return '🔥 高风险';
+  if (risk > 200) return '⚡ 较高风险';
+  if (risk > 180) return '⚠️ 中等风险';
+  return '✅ 低风险';
+}
+
+function showWinOverlay() {
+  const { map: dangerMap, maxVal } = computeDangerCells();
+  
+  // Redraw grid with danger overlay
+  renderGrid();
+
+  // Add danger heatmap on top of canvas
+  const c = getCtx();
+  const ctx = c;
+  for (let r = 0; r < SIZE; r++) {
+    for (let cc = 0; cc < SIZE; cc++) {
+      const risk = dangerMap[r][cc];
+      const color = getDangerColor(risk);
+      if (!color) continue;
+      
+      const x = GRID_OFFSET + cc * (CELL_SIZE + GAP);
+      const y = GRID_OFFSET + r * (CELL_SIZE + GAP);
+      
+      // Danger glow
+      ctx.fillStyle = color;
+      roundRect(ctx, x, y, CELL_SIZE, CELL_SIZE, 8);
+      ctx.fill();
+      
+      // Pulsing border
+      const intensity = Math.min(1, (risk - 180) / 120);
+      const borderR = Math.round(239 * intensity + 234 * (1 - intensity));
+      const borderG = Math.round(68 * intensity);
+      const borderB = Math.round(68 * intensity);
+      ctx.strokeStyle = 'rgba(' + borderR + ',' + borderG + ',' + borderB + ',0.6)';
+      ctx.lineWidth = 2;
+      roundRect(ctx, x, y, CELL_SIZE, CELL_SIZE, 8);
+      ctx.stroke();
+    }
+  }
+  
+  // Count danger cells
+  let dangerCount = 0;
+  for (let r = 0; r < SIZE; r++) {
+    for (let cc = 0; cc < SIZE; cc++) {
+      if (getDangerColor(dangerMap[r][cc])) dangerCount++;
+    }
+  }
+  
+  // Find the most dangerous cell
+  let maxRisk = -1, maxRC = null;
+  for (let r = 0; r < SIZE; r++) {
+    for (let cc = 0; cc < SIZE; cc++) {
+      if (dangerMap[r][cc] > maxRisk) { maxRisk = dangerMap[r][cc]; maxRC = [r, cc]; }
+    }
+  }
+  
+  // Update hint bar with celebration
+  document.getElementById('hintBar').innerHTML = 
+    '🎉 完美通关！' + dangerCount + '个危险单元格被成功规避！';
+  
+  // Show win overlay
+  const overlay = document.getElementById('overlay');
+  const detail = document.getElementById('explosionDetail');
+  const finalScore = document.getElementById('finalScore');
+  const h2 = overlay.querySelector('h2');
+  
+  h2.textContent = '🎉 完美通关！';
+  let dangerSummary = '成功避开 <strong>' + dangerCount + '</strong> 个危险单元格！';
+  if (maxRC) {
+    const val = grid[maxRC[0]][maxRC[1]];
+    const nbrs = getNeighbors(maxRC[0], maxRC[1]);
+    const nbrVals = nbrs.map(([nr, nc]) => grid[nr][nc]);
+    dangerSummary += '<br>最危险: (' + (maxRC[0]+1) + ',' + (maxRC[1]+1) + ') = ' + val + ' + [' + nbrVals.join(',') + '] = ' + maxRisk;
+  }
+  detail.innerHTML = dangerSummary;
+  finalScore.textContent = '100';
+  overlay.style.display = 'flex';
+  
+  // Victory sound
+  speak('完美通关！');
+  
+  // Trigger celebratory firework
+  launchFireworks();
+}
+
 function initGrid() {
   const nums = shuffle(Array.from({length: 100}, (_, i) => i + 1));
   grid = [];
@@ -793,6 +916,7 @@ function initGrid() {
   }
   revealed = Array.from({length: SIZE}, () => Array(SIZE).fill(false));
   gameOver = false;
+  gameWon = false;
   score = 0;
   explodedCell = null;
   blPhase = 'center';
@@ -1246,6 +1370,12 @@ function clickCell(r, c) {
 
   renderGrid();
   renderDistPanel();
+
+  // Win check: all safe cells revealed
+  if (score === 100) {
+    gameWon = true;
+    showWinOverlay();
+  }
 }
 
 function hoverCell(r, c, cellEl) {
@@ -1283,9 +1413,14 @@ function unhoverCell(r, c, cellEl) {
 }
 
 function resetGame() {
+  gameWon = false;
   undoStack = [];
   updateUndoBtn();
   document.getElementById('overlay').style.display = 'none';
+  // Reset overlay text
+  document.getElementById('overlay').querySelector('h2').textContent = '爆炸了!';
+  document.getElementById('explosionDetail').innerHTML = '';
+  document.getElementById('finalScore').textContent = '0';
   document.getElementById('hintBar').innerHTML = '悬停查看策略提示 | <span class="phase-badge">中央启动</span>';
   stopFireworks();
   initGrid();
@@ -1298,14 +1433,14 @@ function resetGame() {
 function updateUndoBtn() {
   if (!undoBtn) undoBtn = document.getElementById('undoBtn');
   if (!undoBtn) return;
-  const canUndo = undoStack.length > 0 && !gameOver;
+  const canUndo = undoStack.length > 0 && !gameOver && !gameWon;
   undoBtn.disabled = !canUndo;
   undoBtn.style.opacity = canUndo ? '1' : '0.4';
   undoBtn.textContent = '↩ 撤回' + (undoStack.length > 0 ? ' (' + undoStack.length + ')' : '');
 }
 
 function undoLastMove() {
-  if (undoStack.length === 0 || gameOver) return;
+  if (undoStack.length === 0 || gameOver || gameWon) return;
 
   const state = undoStack.pop();
 
